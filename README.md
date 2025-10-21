@@ -1,36 +1,50 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DeepDive MVP — Learning Paths from YouTube
 
-## Getting Started
+Purpose: Curate high‑quality YouTube videos into clear learning paths with levels (Beginner, Intermediate, Advanced). Output: a public dataset and simple UI later.
 
-First, run the development server:
+## Scope (Day 1)
+- Define topics and levels
+- Create a spreadsheet schema (Google Sheets)
+- Set up a GitHub repository with this README and a `/data` folder
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Data Model (v0)
+CSV columns (one row per resource):
+- `topic_id`: Short code, e.g., `PRG` for Programming
+- `topic_name`: Human name, e.g., Programmierung
+- `level`: One of `Beginner|Intermediate|Advanced`
+- `subtopic_id`: Unique code for subtopic, e.g., `PRG-Java-01`
+- `subtopic_name`: Human name, e.g., Java Grundlagen
+- `content_type`: `video|article|playlist`
+- `title`: Title of the resource
+- `source_channel`: YouTube channel or author
+- `video_url`: Full URL
+- `language`: `en|de|...` or `de/en` if bilingual
+- `duration_min`: Integer minutes
+- `difficulty_score_1to5`: Rough rating of how hard it feels
+- `prerequisites`: Comma‑separated list or short text
+- `tags`: Comma‑separated keywords
+- `notes`: Short curator notes
+- `status`: `queued|approved|rejected`
+- `playlist_candidate`: `Y|N`
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+A starter CSV lives at `/data/topics.csv` in this repo.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## How to Use
+1. Maintain the master list in Google Sheets using the same headers as above.
+2. Export as CSV and place it at `data/topics.csv` for versioning.
+3. Open a Pull Request for any edits. Keep changes atomic and well described.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Conventions
+- Topic IDs are 3–4 uppercase letters. Subtopics use `TOPIC-Name-XX`.
+- Keep titles as shown on YouTube. Avoid emojis.
+- Language codes: ISO‑like short codes (`en`, `de`, `fr`). For mixed, use `de/en`.
+- Status changes require a short reason in `notes`.
 
-## Learn More
+## Roadmap (high level)
+- v0: Public CSV + README
+- v0.1: Simple static site that reads `data/topics.csv`
+- v0.2: Filters for language and level
+- v0.3: Basic learning paths (3 starter videos → mid → deep dive)
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## License
+MIT. See `LICENSE` later.
