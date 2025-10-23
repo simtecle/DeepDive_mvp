@@ -1,17 +1,12 @@
 import { supabase } from './supabaseClient';
 import { Video } from '@/types/video';
 
-console.log('Supabase env test:', {
-  url: process.env.NEXT_PUBLIC_SUPABASE_URL,
-  key: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? '✓ key loaded' : '❌ key missing'
-});
-
 export async function fetchVideos(search: string, language: string, level: string): Promise<Video[]> {
   let q = supabase
     .from('videos')
     .select('*')
-    // .eq('is_active', true)
-    // .in('status', ['queued', 'published'])
+    .eq('is_active', true)
+    .in('status', ['queued', 'published'])
     .order('created_at', { ascending: false })
     .limit(30);
 
@@ -19,7 +14,7 @@ export async function fetchVideos(search: string, language: string, level: strin
   if (level) q = q.eq('level', level);
 
   if (search.trim()) {
-    q = q.ilike('title', `%${search}%`);
+    q = q.or(`title.ilike.%${search}%,topic_name.ilike.%${search}%,subtopic_name.ilike.%${search}%,tags_text.ilike.%${search}%,tags.ilike.%${search}%`);
   }
 
   const { data, error } = await q;

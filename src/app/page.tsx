@@ -32,8 +32,10 @@ export default function HomePage() {
         {/* Content Section */}
         {loading ? (
           <p className="text-neutral-400">Loading…</p>
+        ) : !search.trim() ? (
+          <p className="text-neutral-500 text-sm italic">Start your search above to find learning videos.</p>
         ) : videos.length === 0 ? (
-          <p className="text-neutral-500 text-sm italic">No videos found. Try searching for a topic.</p>
+          <p className="text-neutral-500 text-sm italic">No videos found. Try another topic.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {videos.map((v) => (
