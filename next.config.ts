@@ -1,7 +1,17 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  images: {
+    // Allow YouTube thumbnails used by thumb(): https://i.ytimg.com/vi/<id>/hqdefault.jpg
+    domains: ['i.ytimg.com'],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'i.ytimg.com',
+        pathname: '/vi/**',
+      },
+    ],
+  },
 };
 
 export default nextConfig;
