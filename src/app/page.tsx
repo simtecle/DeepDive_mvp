@@ -12,6 +12,8 @@ export default function HomePage() {
   const [search, setSearch] = useState('');
   const [language, setLanguage] = useState('');
   const [level, setLevel] = useState('');
+  const [requestStatus, setRequestStatus] = useState('');
+  const [requestBusy, setRequestBusy] = useState(false);
 
   const filters = useMemo<Filters>(() => ({ search, language, level }), [search, language, level]);
 
@@ -53,6 +55,7 @@ export default function HomePage() {
           onLanguageChange={setLanguage}
           onLevelChange={setLevel}
           onSubmit={async () => {
+            setRequestStatus('');
             await searchVideos(search, language, level);
           }}
         />
@@ -63,7 +66,60 @@ export default function HomePage() {
         ) : !search.trim() ? (
           <p className="text-neutral-500 text-sm italic">Start your search above to find learning videos.</p>
         ) : videos.length === 0 ? (
-          <p className="text-neutral-500 text-sm italic">No videos found. Try another topic.</p>
+          <div className="space-y-3">
+            <p className="text-neutral-500 text-sm italic">No videos found. Try another topic.</p>
+
+            <div className="space-y-2">
+              <button
+                className="bg-neutral-200 text-neutral-900 rounded-lg px-3 py-2 disabled:opacity-60"
+                disabled={requestBusy}
+                onClick={async () => {
+                  const q = search.trim();
+                  if (!q) return;
+
+                  const ok = window.confirm(`Request "${q}"?`);
+                  if (!ok) return;
+
+                  setRequestBusy(true);
+                  setRequestStatus('Submitting request…');
+
+                  try {
+                    const res = await fetch('/api/request-topic', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ query_raw: q }),
+                    });
+
+                    if (res.status === 429) {
+                      setRequestStatus('Rate limit reached. Try again later.');
+                      return;
+                    }
+
+                    const data: unknown = await res.json();
+                    const accepted =
+                      typeof data === 'object' &&
+                      data !== null &&
+                      'accepted' in data &&
+                      (data as { accepted: boolean }).accepted === true;
+
+                    if (accepted) {
+                      setRequestStatus('Request submitted. Check back later.');
+                    } else {
+                      setRequestStatus('Request failed. Try again.');
+                    }
+                  } catch {
+                    setRequestStatus('Request failed. Try again.');
+                  } finally {
+                    setRequestBusy(false);
+                  }
+                }}
+              >
+                Request this topic
+              </button>
+
+              {requestStatus && <p className="text-sm text-neutral-400">{requestStatus}</p>}
+            </div>
+          </div>
         ) : (
           <div className="space-y-10">
             {startHere && (
