@@ -6,15 +6,24 @@ export async function fetchVideos(search: string, language: string, level: strin
     .from('videos')
     .select('*')
     .eq('is_active', true)
-    .in('status', ['queued', 'published'])
+    .eq('status', 'published')
+    // Hard filters for Ranking v1
+    .gte('duration_min', 5)
+    .not('video_url', 'ilike', '%/shorts/%')
     .order('created_at', { ascending: false })
-    .limit(30);
+    .limit(200);
 
   if (language) q = q.eq('language', language);
   if (level) q = q.eq('level', level);
 
-  if (search.trim()) {
-    q = q.or(`title.ilike.%${search}%,topic_name.ilike.%${search}%,subtopic_name.ilike.%${search}%,tags_text.ilike.%${search}%,tags.ilike.%${search}%`);
+  const s = search.trim();
+  if (s) {
+    // Avoid commas/percent which can break the PostgREST `or` filter string
+    const safe = s.replace(/[%_,]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    q = q.or(
+      `title.ilike.%${safe}%,topic_name.ilike.%${safe}%,subtopic_name.ilike.%${safe}%,tags_text.ilike.%${safe}%`
+    );
   }
 
   const { data, error } = await q;
