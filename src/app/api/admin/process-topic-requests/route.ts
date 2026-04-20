@@ -190,7 +190,7 @@ export async function POST(req: NextRequest) {
   // lookback is how many "new" requests we fetch to dedupe within a batch
   const lookback = Math.max(maxTopics, Math.min(200, Number(body.lookback ?? maxTopics * 10) || maxTopics * 10));
   const maxPerQuery = Math.max(1, Math.min(50, Number(body.maxPerQuery ?? 25) || 25));
-  const language = validLang(body.language);
+  const language = validLang(body.language) ?? 'en';
   const classifyLimit = Math.max(0, Math.min(200, Number(body.classifyLimit ?? 100) || 100));
   const queueCeiling = Math.max(0, Math.min(5000, Number(body.queueCeiling ?? 300) || 300));
   const threshold = Number(process.env.CLASSIFY_CONFIDENCE_THRESHOLD ?? '0.8');
@@ -364,6 +364,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
+    queuedCount: queuedCount ?? 0,
     picked: canon.map((c) => ({ id: c.id, intent: normIntent(c.normalized_intent ?? c.query_norm ?? c.query_raw) })),
     merged,
     import: importResults,
