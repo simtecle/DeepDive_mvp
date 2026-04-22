@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useVideos } from '@/hooks/useVideos';
 import { SearchBar } from '@/components/SearchBar';
 import { thumb } from '@/lib/videoService';
+import { Footer } from '@/components/Footer';
 
 export default function HomePage() {
   const { videos, tracks, loading, searchVideos } = useVideos();
@@ -195,6 +196,8 @@ export default function HomePage() {
           </div>
         )}
       </section>
+
+      <Footer />
     </main>
   );
 }
