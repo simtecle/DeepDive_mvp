@@ -1,31 +1,28 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { readConsent, writeConsent, type ConsentState } from '@/lib/consent';
+import type { ConsentState } from '@/lib/consent';
 
 type Props = {
-  onChange: (consent: ConsentState) => void;
+  consent: ConsentState;
+  onChange: (next: ConsentState) => void;
 };
 
-export function ConsentBanner({ onChange }: Props) {
+export function ConsentBanner({ consent, onChange }: Props) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    const existing = readConsent();
-    if (!existing) setVisible(true);
-  }, []);
+    // Show only if the user has not made a decision yet.
+    setVisible(consent.decidedAt === null);
+  }, [consent.decidedAt]);
 
   function accept() {
-    const c: ConsentState = { analytics: true, updatedAt: new Date().toISOString() };
-    writeConsent(c);
-    onChange(c);
+    onChange({ analytics: true, decidedAt: new Date().toISOString() });
     setVisible(false);
   }
 
   function reject() {
-    const c: ConsentState = { analytics: false, updatedAt: new Date().toISOString() };
-    writeConsent(c);
-    onChange(c);
+    onChange({ analytics: false, decidedAt: new Date().toISOString() });
     setVisible(false);
   }
 
@@ -35,7 +32,7 @@ export function ConsentBanner({ onChange }: Props) {
     <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-neutral-800 bg-neutral-950/95 backdrop-blur">
       <div className="mx-auto max-w-5xl px-4 py-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="text-sm text-neutral-200">
-          <div className="font-medium">Cookies & Analytics</div>
+          <div className="font-medium">Cookies &amp; Analytics</div>
           <div className="text-neutral-400">
             We use analytics to understand usage and improve the product. You can accept or reject analytics tracking.
           </div>
