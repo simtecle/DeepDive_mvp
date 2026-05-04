@@ -15,8 +15,8 @@ export function Topbar() {
   const title = titleFromPath(pathname);
 
   return (
-    <header className="sticky top-0 z-10 border-b border-neutral-800 bg-neutral-950/80 backdrop-blur px-6 py-4">
-      <div className="text-sm text-neutral-300">{title}</div>
+    <header className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/80 backdrop-blur px-6 py-4">
+      <div className="text-sm text-slate-300">{title}</div>
     </header>
   );
 }

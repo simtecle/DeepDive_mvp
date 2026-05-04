@@ -1,16 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Image from 'next/image';
-import { useSearchParams } from 'next/navigation';
+import { SnakeTrack } from '@/components/SnakeTrack';
+import type { VideoCardVideo } from '@/components/VideoCard';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useVideos } from '@/hooks/useVideos';
 import { SearchBar } from '@/components/SearchBar';
-import { thumb } from '@/lib/videoService';
 
 export default function SearchPageClient() {
+  const router = useRouter();
   const sp = useSearchParams();
   const qParam = (sp.get('q') ?? '').trim();
   const levelParam = (sp.get('level') ?? '').trim();
+  const langParam = (sp.get('lang') ?? '').trim();
 
   const { videos, tracks, loading, searchVideos } = useVideos();
   const [search, setSearch] = useState('');
@@ -22,13 +24,34 @@ export default function SearchPageClient() {
   const [hasSearched, setHasSearched] = useState(false);
   const [lastSearched, setLastSearched] = useState<{ q: string; language: string; level: string } | null>(null);
 
-  const trackSections = useMemo(() => {
+  const snakeTracks = useMemo(() => {
     const t = tracks;
-    return [
-      { title: 'Beginner Track', track: t?.Beginner ?? null },
-      { title: 'Intermediate Track', track: t?.Intermediate ?? null },
-      { title: 'Advanced Track', track: t?.Advanced ?? null },
-    ];
+
+    const toCardVideo = (v: any): VideoCardVideo => ({
+      title: String(v?.title ?? ''),
+      video_url: String(v?.video_url ?? ''),
+      source_channel: v?.source_channel ?? null,
+      duration_min: v?.duration_min ?? null,
+      language: v?.language ?? null,
+      level: v?.level ?? null,
+    });
+
+    const buildList = (track: any): VideoCardVideo[] => {
+      if (!track) return [];
+      const list: any[] = [];
+      if (track.startHere) list.push(track.startHere);
+      if (Array.isArray(track.items)) list.push(...track.items);
+      // Filter invalid entries defensively
+      return list
+        .map(toCardVideo)
+        .filter((x) => x.title && x.video_url);
+    };
+
+    return {
+      beginner: buildList(t?.Beginner ?? null),
+      intermediate: buildList(t?.Intermediate ?? null),
+      advanced: buildList(t?.Advanced ?? null),
+    };
   }, [tracks]);
 
   useEffect(() => {
@@ -39,9 +62,11 @@ export default function SearchPageClient() {
       setLevel(levelParam);
     }
 
+    if (langParam && langParam !== language) setLanguage(langParam);
+
     setHasSearched(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qParam, levelParam]);
+  }, [qParam, levelParam, langParam]);
 
   useEffect(() => {
     const q = qParam;
@@ -50,22 +75,22 @@ export default function SearchPageClient() {
     const allowedLevels = new Set(['', 'Beginner', 'Intermediate', 'Advanced']);
     const lvl = allowedLevels.has(levelParam) ? levelParam : '';
 
-    const key = JSON.stringify({ q, language, level: lvl });
+    const key = JSON.stringify({ q, language: langParam || language, level: lvl });
     if (key === autoKey) return;
 
     setAutoKey(key);
     setRequestStatus('');
-    setLastSearched({ q, language, level: lvl });
+    setLastSearched({ q, language: langParam || language, level: lvl });
     setHasSearched(true);
-    void searchVideos(q, language, lvl);
+    void searchVideos(q, langParam || language, lvl);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qParam, levelParam, language]);
+  }, [qParam, levelParam, langParam, language]);
 
   return (
     <main className="space-y-4">
       <header>
         <h1 className="text-3xl font-semibold">DeepDive</h1>
-        <p className="text-sm text-neutral-400">Search learning videos by topic</p>
+        <p className="text-sm text-slate-400">Search learning videos by topic</p>
       </header>
 
       <SearchBar
@@ -86,10 +111,29 @@ export default function SearchPageClient() {
         }}
         onSubmit={async () => {
           const q = search.trim();
+          if (!q) return;
+
           setRequestStatus('');
           setHasSearched(true);
           setLastSearched({ q, language, level });
-          await searchVideos(q, language, level);
+
+          // Keep URL in sync so results are shareable and navigation from Popular pre-fills correctly.
+          const params = new URLSearchParams();
+          params.set('q', q);
+          if (level) params.set('level', level);
+          if (language) params.set('lang', language);
+
+          const nextUrl = `/search?${params.toString()}`;
+
+          // If URL already matches current params, run search directly.
+          // Otherwise, update the URL and let the effect below trigger the search.
+          const currentLangParam = (sp.get('lang') ?? '').trim();
+          if (qParam === q && levelParam === level && currentLangParam === language) {
+            await searchVideos(q, language, level);
+            return;
+          }
+
+          router.replace(nextUrl);
         }}
       />
 
@@ -150,73 +194,9 @@ export default function SearchPageClient() {
         </div>
       ) : (
         <div className="space-y-10">
-          {trackSections.map(({ title, track }) => (
-            <section key={title} className="space-y-4">
-              <h2 className="text-lg font-semibold">{title}</h2>
-
-              {!track || !track.startHere ? (
-                <p className="text-neutral-500 text-sm italic">No videos in this track yet.</p>
-              ) : (
-                <div className="space-y-6">
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-semibold text-neutral-300">Start Here</h3>
-                    <article className="bg-neutral-900 rounded-2xl overflow-hidden border border-neutral-800">
-                      <div className="relative aspect-video bg-neutral-800">
-                        <Image
-                          src={thumb(track.startHere.video_url)}
-                          alt={track.startHere.title}
-                          fill
-                          sizes="(max-width: 1024px) 100vw, 33vw"
-                          className="object-cover"
-                        />
-                      </div>
-                      <div className="p-4 space-y-2">
-                        <h4 className="font-medium leading-snug">{track.startHere.title}</h4>
-                        <div className="text-xs text-neutral-400">
-                          <span>{track.startHere.source_channel || 'Unknown'}</span>
-                          {track.startHere.language && <span> · {track.startHere.language}</span>}
-                          {track.startHere.level && <span> · {track.startHere.level}</span>}
-                          {track.startHere.duration_min && <span> · {track.startHere.duration_min} min</span>}
-                        </div>
-                        <a href={track.startHere.video_url} target="_blank" rel="noreferrer" className="inline-block text-sm underline underline-offset-4">
-                          Watch
-                        </a>
-                      </div>
-                    </article>
-                  </div>
-
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-semibold text-neutral-300">More in this track</h3>
-                    {track.items.length === 0 ? (
-                      <p className="text-neutral-500 text-sm italic">No additional videos yet.</p>
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {track.items.map((v) => (
-                          <article key={v.id} className="bg-neutral-900 rounded-2xl overflow-hidden border border-neutral-800 hover:border-neutral-600 transition-colors">
-                            <div className="relative aspect-video bg-neutral-800">
-                              <Image src={thumb(v.video_url)} alt={v.title} fill sizes="(max-width: 1024px) 100vw, 33vw" className="object-cover" />
-                            </div>
-                            <div className="p-4 space-y-2">
-                              <h4 className="font-medium leading-snug">{v.title}</h4>
-                              <div className="text-xs text-neutral-400">
-                                <span>{v.source_channel || 'Unknown'}</span>
-                                {v.language && <span> · {v.language}</span>}
-                                {v.level && <span> · {v.level}</span>}
-                                {v.duration_min && <span> · {v.duration_min} min</span>}
-                              </div>
-                              <a href={v.video_url} target="_blank" rel="noreferrer" className="inline-block text-sm underline underline-offset-4">
-                                Watch
-                              </a>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </section>
-          ))}
+          <SnakeTrack title="Beginner Track" videos={snakeTracks.beginner} coreCount={4} morePreviewCount={6} />
+          <SnakeTrack title="Intermediate Track" videos={snakeTracks.intermediate} coreCount={4} morePreviewCount={6} />
+          <SnakeTrack title="Advanced Track" videos={snakeTracks.advanced} coreCount={4} morePreviewCount={6} />
         </div>
       )}
     </main>
