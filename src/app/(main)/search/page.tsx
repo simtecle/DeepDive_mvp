@@ -1,18 +1,25 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
 import { useVideos } from '@/hooks/useVideos';
 import { SearchBar } from '@/components/SearchBar';
 import { thumb } from '@/lib/videoService';
-import { Footer } from '@/components/Footer';
 
 export default function HomePage() {
+  const sp = useSearchParams();
+  const qParam = (sp.get('q') ?? '').trim();
+  const levelParam = (sp.get('level') ?? '').trim();
+
   const { videos, tracks, loading, searchVideos } = useVideos();
   const [search, setSearch] = useState('');
   const [language, setLanguage] = useState('');
   const [level, setLevel] = useState('');
   const [requestStatus, setRequestStatus] = useState('');
   const [requestBusy, setRequestBusy] = useState(false);
+  const [autoKey, setAutoKey] = useState<string>('');
+  const [hasSearched, setHasSearched] = useState(false);
+  const [lastSearched, setLastSearched] = useState<{ q: string; language: string; level: string } | null>(null);
 
   const trackSections = useMemo(() => {
     const t = tracks;
@@ -22,6 +29,39 @@ export default function HomePage() {
       { title: 'Advanced Track', track: t?.Advanced ?? null },
     ];
   }, [tracks]);
+
+  useEffect(() => {
+    // Sync inputs from URL.
+    if (qParam && qParam !== search) setSearch(qParam);
+
+    // Only accept known level values.
+    const allowedLevels = new Set(['Beginner', 'Intermediate', 'Advanced']);
+    if (allowedLevels.has(levelParam) && levelParam !== level) {
+      setLevel(levelParam);
+    }
+    // Changing URL params should reset manual "has searched" gating until the auto-search runs.
+    setHasSearched(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qParam, levelParam]);
+
+  useEffect(() => {
+    // Auto-search when a query is present in the URL.
+    const q = qParam;
+    if (!q) return;
+
+    const allowedLevels = new Set(['', 'Beginner', 'Intermediate', 'Advanced']);
+    const lvl = allowedLevels.has(levelParam) ? levelParam : '';
+
+    const key = JSON.stringify({ q, language, level: lvl });
+    if (key === autoKey) return;
+
+    setAutoKey(key);
+    setRequestStatus('');
+    setLastSearched({ q, language, level: lvl });
+    setHasSearched(true);
+    void searchVideos(q, language, lvl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qParam, levelParam, language]);
 
   return (
     <main className="min-h-screen bg-neutral-950 text-neutral-100">
@@ -36,20 +76,32 @@ export default function HomePage() {
           search={search}
           language={language}
           level={level}
-          onSearchChange={setSearch}
-          onLanguageChange={setLanguage}
-          onLevelChange={setLevel}
+          onSearchChange={(v) => {
+            setSearch(v);
+            setHasSearched(false);
+          }}
+          onLanguageChange={(v) => {
+            setLanguage(v);
+            setHasSearched(false);
+          }}
+          onLevelChange={(v) => {
+            setLevel(v);
+            setHasSearched(false);
+          }}
           onSubmit={async () => {
+            const q = search.trim();
             setRequestStatus('');
-            await searchVideos(search, language, level);
+            setHasSearched(true);
+            setLastSearched({ q, language, level });
+            await searchVideos(q, language, level);
           }}
         />
 
         {/* Content Section */}
         {loading ? (
           <p className="text-neutral-400">Loading…</p>
-        ) : !search.trim() ? (
-          <p className="text-neutral-500 text-sm italic">Start your search above to find learning videos.</p>
+        ) : !hasSearched ? (
+          <p className="text-neutral-500 text-sm italic">Type a topic and press Search.</p>
         ) : videos.length === 0 ? (
           <div className="space-y-3">
             <p className="text-neutral-500 text-sm italic">No videos found. Try another topic.</p>
@@ -59,7 +111,7 @@ export default function HomePage() {
                 className="bg-neutral-200 text-neutral-900 rounded-lg px-3 py-2 disabled:opacity-60"
                 disabled={requestBusy}
                 onClick={async () => {
-                  const q = search.trim();
+                  const q = (lastSearched?.q ?? '').trim();
                   if (!q) return;
 
                   const ok = window.confirm(`Request "${q}"?`);
@@ -197,7 +249,6 @@ export default function HomePage() {
         )}
       </section>
 
-      <Footer />
     </main>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import type { ConsentState } from '@/lib/consent';
 
 type Props = {
@@ -37,7 +38,7 @@ export function ConsentBanner({ consent, onChange }: Props) {
             We use analytics to understand usage and improve the product. You can accept or reject analytics tracking.
           </div>
           <div className="text-neutral-500">
-            See our <a className="underline" href="/privacy">Privacy Policy</a>.
+            See our <Link className="underline" href="/privacy">Privacy Policy</Link>.
           </div>
         </div>
 
@@ -54,6 +55,12 @@ export function ConsentBanner({ consent, onChange }: Props) {
           >
             Accept
           </button>
+          <Link
+            href="/settings"
+            className="rounded-lg border border-neutral-700 px-3 py-2 text-sm text-neutral-300 hover:border-neutral-500 hover:text-neutral-100"
+          >
+            Cookie settings
+          </Link>
         </div>
       </div>
     </div>
