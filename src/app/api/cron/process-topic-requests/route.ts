@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   // Call your existing admin processor (POST) internally.
   // IMPORTANT: keep this job small to avoid Vercel execution timeouts.
   const controller = new AbortController();
-  const timeoutMs = 25_000;
+  const timeoutMs = 40_000;
   const t = setTimeout(() => controller.abort(), timeoutMs);
 
   const adminToken = process.env.ADMIN_TOKEN ?? '';
@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
     body: JSON.stringify({
       // Import-first. Keep classify limited (or move classify to its own cron).
       mode: 'import_only',
-      maxTopics: 2,
+      maxTopics: 4,
       lookback: 30,
       maxPerQuery: 15,
       language: 'en',
