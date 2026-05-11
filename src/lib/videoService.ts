@@ -1,49 +1,76 @@
-import { supabase } from './supabaseClient';
-import { Video } from '@/types/video';
+import { supabase } from '@/lib/supabaseClient';
+import type { Video } from '@/types/video';
 
-export async function fetchVideos(search: string, language: string, level: string): Promise<Video[]> {
+export type Level = 'Beginner' | 'Intermediate' | 'Advanced' | 'Unknown';
+
+export type VideoQuery = {
+  topicName: string;
+  language?: string | null; // e.g. 'en', 'de'
+  level?: Level | null;
+  limit?: number;
+};
+
+/**
+ * Fetch published + active videos for an EXACT canonical topic name.
+ * IMPORTANT: This function intentionally uses eq() for topic matching.
+ */
+export async function fetchVideosByCanonicalTopicName({
+  topicName,
+  language,
+  level,
+  limit = 100,
+}: VideoQuery): Promise<Video[]> {
+  // Defensive trim.
+  const canonical = (topicName ?? '').trim();
+  if (!canonical) return [];
+
+  // Base query.
   let q = supabase
     .from('videos')
-    .select('*')
-    .eq('is_active', true)
+    .select(
+      'id, title, video_url, source_channel, language, level, duration_min, topic_name, subtopic_name, tags_text, status, is_active, created_at, published_at'
+    )
     .eq('status', 'published')
-    // Hard filters for Ranking v1
-    .gte('duration_min', 5)
+    .eq('is_active', true)
+    // Canonical match only (case-insensitive exact when no wildcards are present).
+    .eq('topic_name', canonical)
+    // Keep shorts out.
     .not('video_url', 'ilike', '%/shorts/%')
-    .order('created_at', { ascending: false })
-    .limit(200);
+    // Avoid ultra-short junk (but allow nulls so we don't drop otherwise valid rows).
+    .or('duration_min.is.null,duration_min.gte.5')
+    .order('duration_min', { ascending: false })
+    .limit(limit);
 
-  if (language) q = q.eq('language', language);
-  if (level) q = q.eq('level', level);
+  if (language && language !== 'all') {
+    q = q.eq('language', language);
+  }
 
-  const s = search.trim();
-  if (s) {
-    // Avoid commas/percent which can break the PostgREST `or` filter string
-    const safe = s.replace(/[%_,]/g, ' ').replace(/\s+/g, ' ').trim();
-
-    q = q.or(
-      `title.ilike.%${safe}%,topic_name.ilike.%${safe}%,subtopic_name.ilike.%${safe}%,tags_text.ilike.%${safe}%`
-    );
+  if (level && level !== 'Unknown') {
+    q = q.eq('level', level);
   }
 
   const { data, error } = await q;
-  if (error) throw error;
-  return data || [];
+  if (error) throw new Error(error.message);
+
+  return (data ?? []) as unknown as Video[];
 }
 
-// --- Hilfsfunktion: YouTube Thumbnail URL generieren ---
-export function youTubeIdFromUrl(url: string) {
-  try {
-    const u = new URL(url);
-    if (u.hostname === 'youtu.be') return u.pathname.slice(1);
-    const v = u.searchParams.get('v');
-    return v ?? null;
-  } catch {
-    return null;
+export function groupVideosByLevel(videos: Video[]): Record<Level, Video[]> {
+  const out: Record<Level, Video[]> = {
+    Beginner: [],
+    Intermediate: [],
+    Advanced: [],
+    Unknown: [],
+  };
+
+  for (const v of videos ?? []) {
+    const lvl = (v.level as Level) ?? 'Unknown';
+    if (lvl === 'Beginner' || lvl === 'Intermediate' || lvl === 'Advanced' || lvl === 'Unknown') {
+      out[lvl].push(v);
+    } else {
+      out.Unknown.push(v);
+    }
   }
-}
 
-export function thumb(url: string) {
-  const id = youTubeIdFromUrl(url);
-  return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : '';
+  return out;
 }

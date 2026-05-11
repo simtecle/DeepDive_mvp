@@ -2,6 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { supabaseServer } from '@/lib/supabaseServer';
 
+const MIN_PUBLISHED_PER_TOPIC = Number(process.env.MIN_PUBLISHED_PER_TOPIC ?? '8');
+
+async function getPublishedCountForTopic(topicName: string): Promise<number> {
+  const { count, error } = await supabaseServer
+    .from('videos')
+    .select('id', { count: 'exact', head: true })
+    .eq('is_active', true)
+    .eq('status', 'published')
+    .eq('topic_name', topicName);
+
+  if (error) throw error;
+  return count ?? 0;
+}
+
 function normalizeQuery(q: string): string {
   return q
     .toLowerCase()
@@ -30,6 +44,22 @@ export async function POST(req: NextRequest) {
 
     if (!queryNorm) {
       return NextResponse.json({ accepted: false, reason: 'empty' }, { status: 400 });
+    }
+
+    // Fix 2A: Coverage threshold gate. If a topic already has enough published videos,
+    // we treat it as sufficiently covered and do not accept more requests.
+    const publishedCount = await getPublishedCountForTopic(queryNorm);
+    if (publishedCount >= MIN_PUBLISHED_PER_TOPIC) {
+      return NextResponse.json(
+        {
+          accepted: false,
+          already_covered: true,
+          query_norm: queryNorm,
+          published_count: publishedCount,
+          min_published_per_topic: MIN_PUBLISHED_PER_TOPIC,
+        },
+        { status: 200 },
+      );
     }
 
     // Rate limit: 3 requests/day/ip_hash
@@ -85,7 +115,13 @@ export async function POST(req: NextRequest) {
         });
       if (insErr) throw insErr;
 
-      return NextResponse.json({ accepted: true, merged_into_existing: false, query_norm: queryNorm });
+      return NextResponse.json({
+        accepted: true,
+        merged_into_existing: false,
+        query_norm: queryNorm,
+        published_count: publishedCount,
+        min_published_per_topic: MIN_PUBLISHED_PER_TOPIC,
+      });
     }
 
     const { error: updErr } = await supabaseServer
@@ -98,7 +134,13 @@ export async function POST(req: NextRequest) {
 
     if (updErr) throw updErr;
 
-    return NextResponse.json({ accepted: true, merged_into_existing: true, query_norm: queryNorm });
+    return NextResponse.json({
+      accepted: true,
+      merged_into_existing: true,
+      query_norm: queryNorm,
+      published_count: publishedCount,
+      min_published_per_topic: MIN_PUBLISHED_PER_TOPIC,
+    });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'unknown';
     return NextResponse.json({ accepted: false, error: message }, { status: 500 });

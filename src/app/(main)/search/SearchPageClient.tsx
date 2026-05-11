@@ -1,11 +1,41 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SnakeTrack } from '@/components/SnakeTrack';
-import type { VideoCardVideo } from '@/components/VideoCard';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useVideos } from '@/hooks/useVideos';
 import { SearchBar } from '@/components/SearchBar';
+
+type ResolveTopicResponse =
+  | { ok: true; topic_name: string; topic_key: string; match_type: string; score: number }
+  | { ok: false; reason?: string; error?: string };
+
+type TopicSuggestion = { topic_name: string; published_count: number };
+
+type TopTopicsResponse =
+  | { ok: true; topics: TopicSuggestion[] }
+  | { ok: false; error?: string };
+
+function normalizeForMatch(s: string) {
+  return (s ?? '').trim().toLowerCase();
+}
+
+function sortSuggestions(query: string, list: TopicSuggestion[]) {
+  const q = normalizeForMatch(query);
+  const scored = (list ?? []).map((s) => {
+    const name = normalizeForMatch(s.topic_name);
+    const starts = q && name.startsWith(q) ? 0 : 1;
+    const contains = q && name.includes(q) ? 0 : 1;
+    return { s, starts, contains };
+  });
+  scored.sort((a, b) => {
+    if (a.starts !== b.starts) return a.starts - b.starts;
+    if (a.contains !== b.contains) return a.contains - b.contains;
+    if ((b.s.published_count ?? 0) !== (a.s.published_count ?? 0)) return (b.s.published_count ?? 0) - (a.s.published_count ?? 0);
+    return a.s.topic_name.localeCompare(b.s.topic_name);
+  });
+  return scored.map((x) => x.s);
+}
 
 export default function SearchPageClient() {
   const router = useRouter();
@@ -23,36 +53,10 @@ export default function SearchPageClient() {
   const [autoKey, setAutoKey] = useState<string>('');
   const [hasSearched, setHasSearched] = useState(false);
   const [lastSearched, setLastSearched] = useState<{ q: string; language: string; level: string } | null>(null);
+  const [noCanonicalMatch, setNoCanonicalMatch] = useState(false);
 
-  const snakeTracks = useMemo(() => {
-    const t = tracks;
-
-    const toCardVideo = (v: any): VideoCardVideo => ({
-      title: String(v?.title ?? ''),
-      video_url: String(v?.video_url ?? ''),
-      source_channel: v?.source_channel ?? null,
-      duration_min: v?.duration_min ?? null,
-      language: v?.language ?? null,
-      level: v?.level ?? null,
-    });
-
-    const buildList = (track: any): VideoCardVideo[] => {
-      if (!track) return [];
-      const list: any[] = [];
-      if (track.startHere) list.push(track.startHere);
-      if (Array.isArray(track.items)) list.push(...track.items);
-      // Filter invalid entries defensively
-      return list
-        .map(toCardVideo)
-        .filter((x) => x.title && x.video_url);
-    };
-
-    return {
-      beginner: buildList(t?.Beginner ?? null),
-      intermediate: buildList(t?.Intermediate ?? null),
-      advanced: buildList(t?.Advanced ?? null),
-    };
-  }, [tracks]);
+  const [suggestions, setSuggestions] = useState<TopicSuggestion[]>([]);
+  const [suggestBusy, setSuggestBusy] = useState(false);
 
   useEffect(() => {
     if (qParam && qParam !== search) setSearch(qParam);
@@ -65,8 +69,56 @@ export default function SearchPageClient() {
     if (langParam && langParam !== language) setLanguage(langParam);
 
     setHasSearched(false);
+    setNoCanonicalMatch(false);
+    setSuggestions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qParam, levelParam, langParam]);
+
+  async function resolveAndSearch(rawInput: string, lang: string, lvl: string, opts?: { syncUrl?: boolean }) {
+    const raw = (rawInput ?? '').trim();
+    if (!raw) return;
+
+    setRequestStatus('');
+    setNoCanonicalMatch(false);
+    setSuggestions([]);
+
+    // Resolve canonical topic first to avoid mixed/approximate matches.
+    let resolvedName = '';
+    try {
+      const res = await fetch(`/api/resolve-topic?q=${encodeURIComponent(raw)}`);
+      const data = (await res.json()) as ResolveTopicResponse;
+      if (res.ok && data && 'ok' in data && data.ok) {
+        resolvedName = data.topic_name;
+      }
+    } catch {
+      // ignore
+    }
+
+    setHasSearched(true);
+    setLastSearched({ q: raw, language: lang, level: lvl });
+
+    if (!resolvedName) {
+      setNoCanonicalMatch(true);
+      return;
+    }
+
+    // Optionally keep URL in sync (shareable). Use canonical topic name in the URL.
+    if (opts?.syncUrl) {
+      const params = new URLSearchParams();
+      params.set('q', resolvedName);
+      if (lvl) params.set('level', lvl);
+      if (lang) params.set('lang', lang);
+      const nextUrl = `/search?${params.toString()}`;
+
+      // Avoid triggering a pointless navigation loop.
+      const currentLangParam = (sp.get('lang') ?? '').trim();
+      if (qParam !== resolvedName || levelParam !== lvl || currentLangParam !== lang) {
+        router.replace(nextUrl);
+      }
+    }
+
+    await searchVideos(resolvedName, lang, lvl);
+  }
 
   useEffect(() => {
     const q = qParam;
@@ -78,13 +130,69 @@ export default function SearchPageClient() {
     const key = JSON.stringify({ q, language: langParam || language, level: lvl });
     if (key === autoKey) return;
 
-    setAutoKey(key);
-    setRequestStatus('');
-    setLastSearched({ q, language: langParam || language, level: lvl });
-    setHasSearched(true);
-    void searchVideos(q, langParam || language, lvl);
+    const run = async () => {
+      setAutoKey(key);
+      const raw = q;
+      const lang = langParam || language;
+      await resolveAndSearch(raw, lang, lvl, { syncUrl: false });
+    };
+
+    void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qParam, levelParam, langParam, language]);
+
+  // When we have no canonical match (or no videos after a search), fetch "Did you mean" suggestions.
+  useEffect(() => {
+    const q = (lastSearched?.q ?? '').trim();
+    if (!hasSearched) return;
+    if (!q) return;
+
+    const shouldSuggest = noCanonicalMatch || (!loading && videos.length === 0);
+    if (!shouldSuggest) return;
+
+    const run = async () => {
+      setSuggestBusy(true);
+      try {
+        const res = await fetch(`/api/top-topics?q=${encodeURIComponent(q)}&limit=6`);
+        const data = (await res.json()) as TopTopicsResponse;
+        if (res.ok && data && 'ok' in data && data.ok) {
+          const list = Array.isArray(data.topics) ? data.topics : [];
+          setSuggestions(sortSuggestions(q, list));
+          // If no close matches by substring, fall back to popular topics.
+          if (list.length === 0) {
+            const res2 = await fetch(`/api/top-topics?limit=6`);
+            const data2 = (await res2.json()) as TopTopicsResponse;
+            if (res2.ok && data2 && 'ok' in data2 && data2.ok) {
+              setSuggestions(sortSuggestions(q, Array.isArray(data2.topics) ? data2.topics : []));
+            }
+          }
+        }
+      } catch {
+        // ignore
+      } finally {
+        setSuggestBusy(false);
+      }
+    };
+
+    void run();
+  }, [hasSearched, noCanonicalMatch, loading, videos.length, lastSearched]);
+
+  function goToTopic(t: string) {
+    const next = (t ?? '').trim();
+    if (!next) return;
+
+    // Keep local input in sync immediately.
+    setSearch(next);
+
+    const params = new URLSearchParams();
+    params.set('q', next);
+    if (level) params.set('level', level);
+    if (language) params.set('lang', language);
+    router.replace(`/search?${params.toString()}`);
+
+    // Trigger search immediately so the click feels responsive.
+    void resolveAndSearch(next, language, level, { syncUrl: false });
+  }
 
   return (
     <main className="space-y-4">
@@ -110,30 +218,11 @@ export default function SearchPageClient() {
           setHasSearched(false);
         }}
         onSubmit={async () => {
-          const q = search.trim();
-          if (!q) return;
+          const raw = search.trim();
+          if (!raw) return;
 
-          setRequestStatus('');
-          setHasSearched(true);
-          setLastSearched({ q, language, level });
-
-          // Keep URL in sync so results are shareable and navigation from Popular pre-fills correctly.
-          const params = new URLSearchParams();
-          params.set('q', q);
-          if (level) params.set('level', level);
-          if (language) params.set('lang', language);
-
-          const nextUrl = `/search?${params.toString()}`;
-
-          // If URL already matches current params, run search directly.
-          // Otherwise, update the URL and let the effect below trigger the search.
-          const currentLangParam = (sp.get('lang') ?? '').trim();
-          if (qParam === q && levelParam === level && currentLangParam === language) {
-            await searchVideos(q, language, level);
-            return;
-          }
-
-          router.replace(nextUrl);
+          // Run search first; also sync URL to canonical topic.
+          await resolveAndSearch(raw, language, level, { syncUrl: true });
         }}
       />
 
@@ -141,9 +230,32 @@ export default function SearchPageClient() {
         <p className="text-neutral-400">Loading…</p>
       ) : !hasSearched ? (
         <p className="text-neutral-500 text-sm italic">Type a topic and press Search.</p>
-      ) : videos.length === 0 ? (
-        <div className="space-y-3">
-          <p className="text-neutral-500 text-sm italic">No videos found. Try another topic.</p>
+      ) : noCanonicalMatch || videos.length === 0 ? (
+        <div className="space-y-4">
+          <p className="text-neutral-500 text-sm italic">No matching topic found. Try a more specific topic name.</p>
+
+          {(suggestBusy || suggestions.length > 0) && (
+            <div className="space-y-2">
+              <div className="text-sm font-medium text-slate-200">Did you mean:</div>
+              {suggestBusy ? (
+                <p className="text-sm text-slate-400">Looking for similar topics…</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {suggestions.map((s) => (
+                    <button
+                      key={s.topic_name}
+                      type="button"
+                      onClick={() => goToTopic(s.topic_name)}
+                      className="rounded-full border border-slate-800 bg-slate-950/50 px-3 py-1 text-xs text-slate-200 hover:bg-slate-900 hover:border-sky-500/30"
+                      title={`${s.published_count} videos`}
+                    >
+                      {s.topic_name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <button
@@ -194,9 +306,9 @@ export default function SearchPageClient() {
         </div>
       ) : (
         <div className="space-y-10">
-          <SnakeTrack title="Beginner Track" videos={snakeTracks.beginner} coreCount={4} morePreviewCount={6} />
-          <SnakeTrack title="Intermediate Track" videos={snakeTracks.intermediate} coreCount={4} morePreviewCount={6} />
-          <SnakeTrack title="Advanced Track" videos={snakeTracks.advanced} coreCount={4} morePreviewCount={6} />
+          <SnakeTrack title="Beginner Track" videos={tracks?.Beginner?.items ?? []} coreCount={4} morePreviewCount={6} />
+          <SnakeTrack title="Intermediate Track" videos={tracks?.Intermediate?.items ?? []} coreCount={4} morePreviewCount={6} />
+          <SnakeTrack title="Advanced Track" videos={tracks?.Advanced?.items ?? []} coreCount={4} morePreviewCount={6} />
         </div>
       )}
     </main>

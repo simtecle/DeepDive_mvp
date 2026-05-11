@@ -1,9 +1,16 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
+  
   "crons": [
     {
       "path": "/api/cron/process-topic-requests",
       "schedule": "30 1 * * *"
-    }
+    },
+    {
+      "path": "/api/cron/backfill-topics",
+      "schedule": "0 3 * * *"
+    },
+    { 
+      "path": "/api/cron/classify-queued", "schedule": "15 */12 * * *" 
+  }
   ]
 }

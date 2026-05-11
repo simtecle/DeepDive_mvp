@@ -39,6 +39,14 @@ function norm(s: string) {
   return (s ?? '').toLowerCase().trim();
 }
 
+function normalizeLevel(lvl: Video['level']): Level | null {
+  const x = (lvl ?? '').toString().trim().toLowerCase();
+  if (x === 'beginner') return 'Beginner';
+  if (x === 'intermediate') return 'Intermediate';
+  if (x === 'advanced') return 'Advanced';
+  return null;
+}
+
 
 function tagsToText(v: Video): string {
   // Support both tags_text (comma string) and tags (string[])
@@ -159,8 +167,10 @@ function dateValue(v: Video): number {
 export function buildTrackForLevel(all: Video[], query: string, level: Level): Track {
   const candidates = all
     .filter((v) => !isShortCandidate(v))
+    // Keep this defensive guard even if upstream already filters.
     .filter((v) => v.status === 'published' && v.is_active === true)
-    .filter((v) => (v.level ?? '') === level);
+    // Be robust to casing/whitespace/unknown strings.
+    .filter((v) => normalizeLevel(v.level) === level);
 
   if (candidates.length === 0) return { startHere: null, items: [] };
 
@@ -189,24 +199,43 @@ export function buildTrackForLevel(all: Video[], query: string, level: Level): T
       return dateValue(b) - dateValue(a);
     });
 
+  // Only the first few items are "featured" (snake path). The remaining items are still kept
+  // so "Show more" can reveal all videos that match this level.
+  const FEATURED_ITEMS = 3;
+
   const picked: Video[] = [];
+  const pickedIds = new Set<string>();
+
+  // Practical defaults for early library: avoid empty tracks, even if tags are low-signal
+  // or most videos come from the same channel (common for lecture series).
+  const MIN_ITEMS_BEFORE_STRICT = 3;
+  const MAX_PER_CHANNEL_SOFT = 4; // allow series channels to contribute a few items
+
   for (const v of rest) {
-    if (picked.length >= 6) break; // Start Here + 6
+    if (picked.length >= FEATURED_ITEMS) break;
 
     const ch = norm(v.source_channel ?? 'unknown');
     const used = channelCount.get(ch) ?? 0;
-    if (used >= 2) continue;
+
+    // Channel cap: only enforce strictly once we have some items.
+    // Before that, allow more from the same channel so the track isn't empty.
+    if (picked.length >= MIN_ITEMS_BEFORE_STRICT && used >= MAX_PER_CHANNEL_SOFT) continue;
 
     const gain = tagGain(baseTags, v);
-    if (gain <= 0) continue;
+
+    // Tag diversity: only enforce once we already have a reasonable set.
+    // Many topics currently share identical tags across a series.
+    if (picked.length >= MIN_ITEMS_BEFORE_STRICT && gain <= 0) continue;
 
     picked.push(v);
+    pickedIds.add(v.id);
     channelCount.set(ch, used + 1);
 
     for (const t of tagSetFrom(v)) baseTags.add(t);
   }
 
-  return { startHere, items: picked };
+  const remaining = rest.filter((v) => !pickedIds.has(v.id));
+  return { startHere, items: [...picked, ...remaining] };
 }
 
 export function buildTracksByLevel(all: Video[], query: string): TracksByLevel {

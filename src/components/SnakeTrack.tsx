@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { VideoCard, type VideoCardVideo } from '@/components/VideoCard';
 
 type Props = {
@@ -9,31 +9,50 @@ type Props = {
   videos: VideoCardVideo[];
   /** How many to show as the snake path (defaults to 4). */
   coreCount?: number;
-  /** How many to show in the collapsed grid (defaults to 6). */
+  /** How many to show in the collapsed grid (defaults to 3). */
   morePreviewCount?: number;
 };
 
-function clampNonNeg(n: number, fallback: number) {
+function clampInt(n: number, fallback: number) {
   if (!Number.isFinite(n)) return fallback;
-  return Math.max(0, Math.floor(n));
+  return Math.floor(n);
+}
+
+function clampRange(n: number, fallback: number, min: number, max: number) {
+  const v = clampInt(n, fallback);
+  return Math.min(max, Math.max(min, v));
 }
 
 export function SnakeTrack({
   title,
   videos,
   coreCount = 4,
-  morePreviewCount = 6,
+  morePreviewCount = 3,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
 
-  const coreN = clampNonNeg(coreCount, 4);
-  const previewN = clampNonNeg(morePreviewCount, 6);
+  const resetKey = useMemo(() => {
+    const a = videos?.[0]?.video_url ?? '';
+    const b = videos?.[1]?.video_url ?? '';
+    const c = videos?.[2]?.video_url ?? '';
+    return `${title}|${videos.length}|${a}|${b}|${c}`;
+  }, [title, videos]);
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [resetKey]);
+
+  // Snake should be 3–4 (default 4).
+  const coreN = clampRange(coreCount, 4, 3, 4);
+  // “More” preview should be 0–3, default 3. Clamp to 3 to avoid showing everything.
+  const previewN = clampRange(morePreviewCount, 3, 0, 3);
 
   const { core, rest } = useMemo(() => {
     const list = Array.isArray(videos) ? videos : [];
+    const effectiveCoreN = Math.min(coreN, list.length);
     return {
-      core: list.slice(0, coreN),
-      rest: list.slice(coreN),
+      core: list.slice(0, effectiveCoreN),
+      rest: list.slice(effectiveCoreN),
     };
   }, [videos, coreN]);
 
@@ -41,6 +60,8 @@ export function SnakeTrack({
     if (expanded) return rest;
     return rest.slice(0, previewN);
   }, [rest, expanded, previewN]);
+
+  const remainingCount = Math.max(0, rest.length - previewN);
 
   return (
     <section className="space-y-5">
@@ -193,13 +214,13 @@ export function SnakeTrack({
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-sm font-semibold text-slate-200">More in this track</h3>
 
-              {rest.length > 0 && (
+              {rest.length > previewN && (
                 <button
                   type="button"
-                  onClick={() => setExpanded((s) => !s)}
+                  onClick={() => setExpanded((s) => (s ? false : true))}
                   className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-xs text-slate-200 hover:border-slate-700 hover:bg-slate-900/40"
                 >
-                  {expanded ? 'Show less' : `Show ${Math.min(rest.length, previewN)} more`}
+                  {expanded ? 'Show less' : `Show more (${remainingCount})`}
                 </button>
               )}
             </div>

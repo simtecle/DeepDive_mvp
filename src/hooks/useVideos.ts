@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Video } from '@/types/video';
-import { fetchVideos } from '@/lib/videoService';
+import { supabase } from '@/lib/supabaseClient';
+import { fetchVideosByCanonicalTopicName } from '@/lib/videoService';
 import { buildTracksByLevel } from '@/lib/ranking';
 import type { TracksByLevel } from '@/lib/ranking';
 
@@ -12,13 +13,51 @@ export function useVideos() {
   async function searchVideos(search: string, language: string, level: string) {
     setLoading(true);
     try {
-      console.log('Running query for:', search, language, level);
-      const results = await fetchVideos(search, language, level);
-      console.log('Returned data:', results);
+      const canonical = (search ?? '').trim();
+
+      let results = await fetchVideosByCanonicalTopicName({
+        topicName: canonical,
+        language: language === 'all' ? null : language,
+        level: level === 'all' ? null : (level as any),
+        limit: 100,
+      });
+
+      // Fallback: if the canonical fetch returns 0, try a case-insensitive exact match.
+      // This avoids breaking when DB casing differs (e.g., "Java Programming" vs "Java programming").
+      if ((results?.length ?? 0) === 0 && canonical) {
+        let q = supabase
+          .from('videos')
+          .select('id, title, source_channel, video_url, language, duration_min, level, topic_name, status, is_active')
+          .eq('status', 'published')
+          .eq('is_active', true)
+          // case-insensitive exact (no wildcards)
+          .ilike('topic_name', canonical)
+          // Keep shorts out.
+          .not('video_url', 'ilike', '%/shorts/%')
+          // Avoid ultra-short junk.
+          .gte('duration_min', 5)
+          .order('duration_min', { ascending: false })
+          .limit(100);
+
+        if (language && language !== 'all') {
+          q = q.eq('language', language);
+        }
+
+        if (level && level !== 'all') {
+          q = q.eq('level', level);
+        }
+
+        const { data, error } = await q;
+        if (!error && data) {
+          results = data as unknown as Video[];
+        }
+      }
+
       setVideos(results);
-      setTracks(buildTracksByLevel(results, search));
+      const nextTracks = buildTracksByLevel(results, canonical);
+      setTracks(nextTracks);
     } catch (e) {
-      console.error('Error loading videos:', e);
+      console.error('[DBG useVideos] Error loading videos:', e);
       setVideos([]);
       setTracks(null);
     }

@@ -36,6 +36,63 @@ function normalizeTag(t: string) {
   return t.toLowerCase().trim().replace(/\s+/g, ' ').replace(/[^a-z0-9 -]/g, '');
 }
 
+const MIN_DURATION_MINUTES = Number(process.env.MIN_DURATION_MINUTES ?? '5');
+const NEW_TOPIC_CONFIDENCE_OVERRIDE = Number(process.env.NEW_TOPIC_CONFIDENCE_OVERRIDE ?? '0.92');
+
+function normalizeTopicKey(t: string): string {
+  return t.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+function isLikelyNonLearning(title: string, description: string | null): boolean {
+  const t = `${title} ${(description ?? '')}`.toLowerCase();
+
+  // Very common low-signal / non-learning formats.
+  const bad = [
+    'trailer',
+    'teaser',
+    'reaction',
+    'reacts to',
+    'gameplay',
+    "let's play",
+    'walkthrough',
+    'speedrun',
+    'highlights',
+    'clip',
+    'montage',
+    'meme',
+    'shorts',
+  ];
+
+  return bad.some((k) => t.includes(k));
+}
+
+async function canonicalizeTopicName(topicName: string, cache: Map<string, string | null>): Promise<{ name: string; known: boolean }> {
+  const key = normalizeTopicKey(topicName);
+  if (!key) return { name: topicName, known: false };
+
+  if (cache.has(key)) {
+    const v = cache.get(key);
+    return v ? { name: v, known: true } : { name: topicName, known: false };
+  }
+
+  // Use topic_coverage as the canonical topic list (case-insensitive exact match, no wildcards).
+  const { data, error } = await supabaseServer
+    .from('topic_coverage')
+    .select('topic_name')
+    .ilike('topic_name', key)
+    .maybeSingle();
+
+  if (error) {
+    cache.set(key, null);
+    return { name: topicName, known: false };
+  }
+
+  const canonical = (data?.topic_name ?? null) as string | null;
+  cache.set(key, canonical);
+
+  return canonical ? { name: canonical, known: true } : { name: topicName, known: false };
+}
+
 function buildPrompt(v: DbVideo) {
   return `
 You are classifying a YouTube learning video for a learning-path catalog.
@@ -201,6 +258,8 @@ export async function classifyQueued(args: { limit: number; threshold: number })
   if (error) throw new Error(`db_read_error:${error.message}`);
   const videos = (data ?? []) as DbVideo[];
 
+  const topicCache = new Map<string, string | null>();
+
   let published = 0;
   let rejected = 0;
   let failed = 0;
@@ -221,7 +280,39 @@ export async function classifyQueued(args: { limit: number; threshold: number })
       }
 
       const r = vr.val;
-      const okToPublish = r.confidence >= threshold && r.level !== 'Unknown';
+
+      // Fix 4: stricter publish gate, but keep it practical.
+      // 1) Filter out shorts / ultra-short content.
+      const durationMin = v.duration_min ?? null;
+      const tooShort = typeof durationMin === 'number' && Number.isFinite(durationMin) && durationMin < MIN_DURATION_MINUTES;
+
+      // 2) Filter obvious non-learning formats.
+      const nonLearning = isLikelyNonLearning(v.title, v.description);
+
+      // 3) Canonicalize topic name against known canonical topics (topic_coverage).
+      const canon = await canonicalizeTopicName(r.topic_name, topicCache);
+      const topic_name = canon.name;
+      const topicKnown = canon.known;
+
+      // Allow publishing a *new* topic only when the model is very confident.
+      const allowNewTopic = r.confidence >= NEW_TOPIC_CONFIDENCE_OVERRIDE;
+
+      const okToPublish =
+        r.confidence >= threshold &&
+        r.level !== 'Unknown' &&
+        !tooShort &&
+        !(nonLearning && r.confidence < Math.min(0.98, threshold + 0.12)) &&
+        (topicKnown || allowNewTopic);
+
+      // If we canonicalized, carry it forward.
+      r.topic_name = topic_name;
+
+      // Add lightweight diagnostics.
+      const diagParts: string[] = [];
+      if (tooShort) diagParts.push(`too_short(<${MIN_DURATION_MINUTES}m)`);
+      if (nonLearning) diagParts.push('non_learning_hint');
+      if (!topicKnown) diagParts.push('unknown_topic');
+      const diag = diagParts.length ? diagParts.join(';') : null;
 
       const { error: updErr } = await supabaseServer
         .from('videos')
@@ -233,7 +324,7 @@ export async function classifyQueued(args: { limit: number; threshold: number })
           tags_text: r.tags.join(','),
           prerequisites_text: r.prerequisites_text,
           confidence: r.confidence,
-          notes: r.notes,
+          notes: diag ? `${r.notes ?? ''}${r.notes ? ' | ' : ''}${diag}`.trim() : r.notes,
           status: okToPublish ? 'published' : 'rejected',
           is_active: okToPublish,
         })
