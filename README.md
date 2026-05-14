@@ -1,50 +1,79 @@
-# DeepDive MVP — Learning Paths from YouTube
+# DeepDive
 
-Purpose: Curate high‑quality YouTube videos into clear learning paths with levels (Beginner, Intermediate, Advanced). Output: a public dataset and simple UI later.
+DeepDive turns any topic into a curated YouTube learning path (Beginner → Intermediate → Advanced) and keeps the library maintained via automated ingestion and classification jobs.
 
-## Scope (Day 1)
-- Define topics and levels
-- Create a spreadsheet schema (Google Sheets)
-- Set up a GitHub repository with this README and a `/data` folder
+## Why this exists
+Searching “learn X” on YouTube is noisy and inconsistent. DeepDive aims to:
+- keep results on-topic (canonical topic matching)
+- reduce low-signal content (shorts/ultra-short filtering + publish gate)
+- maintain coverage over time (top-up + backfill jobs)
 
-## Data Model (v0)
-CSV columns (one row per resource):
-- `topic_id`: Short code, e.g., `PRG` for Programming
-- `topic_name`: Human name, e.g., Programmierung
-- `level`: One of `Beginner|Intermediate|Advanced`
-- `subtopic_id`: Unique code for subtopic, e.g., `PRG-Java-01`
-- `subtopic_name`: Human name, e.g., Java Grundlagen
-- `content_type`: `video|article|playlist`
-- `title`: Title of the resource
-- `source_channel`: YouTube channel or author
-- `video_url`: Full URL
-- `language`: `en|de|...` or `de/en` if bilingual
-- `duration_min`: Integer minutes
-- `difficulty_score_1to5`: Rough rating of how hard it feels
-- `prerequisites`: Comma‑separated list or short text
-- `tags`: Comma‑separated keywords
-- `notes`: Short curator notes
-- `status`: `queued|approved|rejected`
-- `playlist_candidate`: `Y|N`
+## Features
+- Topic search with canonical matching and “Did you mean …” suggestions
+- Learning-path UI (snake-track layout) with “Show more” per level
+- Topic request flow (users can request missing topics)
+- Automated ingestion pipeline:
+  - Import candidates from YouTube Data API
+  - Classify and enrich metadata
+  - Publish gate to keep off-topic / low-confidence items out
+- Maintenance automation:
+  - Import-only cron job (keeps queue small)
+  - Classify-queued cron job (drains queue steadily)
+  - Backfill job (tops up under-covered topics with cost-aware cooldowns)
 
-A starter CSV lives at `/data/topics.csv` in this repo.
+## Tech stack
+- Next.js (App Router), TypeScript, Tailwind
+- Supabase (Postgres, RLS)
+- Vercel (deployments + cron)
+- YouTube Data API for discovery
+- LLM-based classification (server-side)
 
-## How to Use
-1. Maintain the master list in Google Sheets using the same headers as above.
-2. Export as CSV and place it at `data/topics.csv` for versioning.
-3. Open a Pull Request for any edits. Keep changes atomic and well described.
+## Architecture 
+1. `topic_requests` collects user requests and seed topics  
+2. `process-topic-requests` imports YouTube candidates into `videos` as `queued`  
+3. `classify-queued` classifies queued rows and promotes them to `published` or rejects them  
+4. `backfill-topics` periodically tops up low-coverage topics with cooldown/stop conditions
 
-## Conventions
-- Topic IDs are 3–4 uppercase letters. Subtopics use `TOPIC-Name-XX`.
-- Keep titles as shown on YouTube. Avoid emojis.
-- Language codes: ISO‑like short codes (`en`, `de`, `fr`). For mixed, use `de/en`.
-- Status changes require a short reason in `notes`.
+## Run locally
+>  Create your own `.env.local`.
 
-## Roadmap (high level)
-- v0: Public CSV + README
-- v0.1: Simple static site that reads `data/topics.csv`
-- v0.2: Filters for language and level
-- v0.3: Basic learning paths (3 starter videos → mid → deep dive)
+1) Install
+```bash
+npm install
+```
 
-## License
-MIT. See `LICENSE` later.
+2) Create `.env.local`
+```bash
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+
+# Admin / Cron
+ADMIN_TOKEN=...
+CRON_SECRET=...
+
+# YouTube + classification
+YOUTUBE_API_KEY=...
+OPENAI_API_KEY=...
+```
+
+3) Start
+```bash
+npm run dev
+```
+
+## Deployment notes
+- Admin routes require `x-admin-token: <ADMIN_TOKEN>`
+- Cron routes accept Vercel scheduled runs (`x-vercel-cron: 1`) or manual runs via
+  `Authorization: Bearer <CRON_SECRET>`
+
+## Security notes (summary)
+- Supabase RLS: only published+active rows are public-readable
+- Service Role key is server-only (never exposed to the client)
+- Admin and cron endpoints are authenticated and rate-limited
+
+## Roadmap
+- Improve topic taxonomy (topic_key/topic_id-first everywhere)
+- Add better topic suggestion ranking and coverage visualizations
+- Add user accounts and saved learning paths
