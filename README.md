@@ -2,6 +2,15 @@
 
 DeepDive turns any topic into a curated YouTube learning path (Beginner → Intermediate → Advanced) and keeps the library maintained via automated ingestion and classification jobs.
 
+## Demo
+- Live app: https://www.deepdivepath.com
+- Demo video (unlisted): https://youtu.be/kKaIN7ok1Ec
+
+## Screenshots
+![Home](docs/images/home.png)
+![Search](docs/images/search.png)
+
+
 ## Why this exists
 Searching “learn X” on YouTube is noisy and inconsistent. DeepDive aims to:
 - keep results on-topic (canonical topic matching)
